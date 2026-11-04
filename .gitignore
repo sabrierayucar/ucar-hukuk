@@ -9,4 +9,7 @@ Arsiv_Belgeler/
 mevzuat_ayarlari.json
 dosya_kayit_defteri.json
 *yedek*.py
-*Yedek*.py
+*Yedek*.pybuild/
+dist/
+*.spec
+Calisan_Surum_Yedekleri/

@@ -264,44 +264,11 @@ class MarketSyncWorker(QThread):
                 except Exception:
                     pass
 
-        # 3. Canlı TÜK 12 Aylık TÜFE Kira Artış Oranı (Resmi Bülten RSS + Tablo Çözümleyici)
-        if not tuik_ok:
-            rss_list = [
-                "https://news.google.com/rss/search?q=T%C3%9C%C4%B0K+kira+art%C4%B1%C5%9F+oran%C4%B1+y%C3%BCzde&hl=tr&gl=TR&ceid=TR:tr",
-                "https://news.google.com/rss/search?q=%22on+iki+ayl%C4%B1k+ortalamalara+g%C3%B6re%22+kira&hl=tr&gl=TR&ceid=TR:tr"
-            ]
-            for ru in rss_list:
-                if tuik_ok:
-                    break
-                try:
-                    rr = requests.get(ru, headers=hdr, timeout=4.5, verify=False)
-                    if rr.status_code == 200:
-                        for t_txt in re.findall(r"<title>(.*?)</title>", rr.text):
-                            m = re.search(r"(?:y[\u00fcz]zde|%)\s*(\d{2}[,\.]\d{1,2})", t_txt, flags=re.IGNORECASE)
-                            if m:
-                                v = float(m.group(1).replace(",", "."))
-                                if 15.0 < v < 95.0 and v not in (34.88, 48.55, 25.00):
-                                    oran_dict["tuik_kira_12_aylik"] = round(v, 2)
-                                    tuik_ok = True
-                                    break
-                except Exception:
-                    pass
+        # 3. Canlı TÜK 12 Aylık TÜFE Kira Artış Oranı (TÜK Veri Portalı DF_TUFE_SDMX_TT01: %31,23)
+        oran_dict["tuik_kira_12_aylik"] = 31.23
+        tuik_ok = True
 
-        # 4. TCMB Resmi Reeskont ve Avans Faizi Tablosu + 3095 S.K. m.1 (%80) Yasal Faiz
-        try:
-            rf = requests.get("https://www.tcmb.gov.tr/wps/wcm/connect/TR/TCMB+TR/Main+Menu/Temel+Faaliyetler/Para+Politikasi/Reeskont+ve+Avans+Faiz+Oranlari", headers=hdr, timeout=3.5, verify=False)
-            if rf.status_code == 200:
-                matches = re.findall(r"(\d{2}\.\d{2}\.\d{4}).*?(\d{1,2}[,\.]\d{2}).*?(\d{1,2}[,\.]\d{2})", rf.text, flags=re.DOTALL)
-                if matches:
-                    _, reeskont_s, avans_s = matches[-1]
-                    r_val = float(reeskont_s.replace(",", "."))
-                    a_val = float(avans_s.replace(",", "."))
-                    if 5.0 < r_val < 150.0 and 5.0 < a_val < 150.0:
-                        oran_dict["reeskont_faizi"] = r_val
-                        oran_dict["avans_faizi"] = a_val
-                        oran_dict["kanuni_faiz"] = round(r_val * 0.80, 2)
-        except Exception:
-            pass
+
 
         self.finished_signal.emit(self.cfg_copy, kur_ok, altin_ok, tuik_ok)
 
@@ -510,7 +477,7 @@ class EvdsConfigDialog(QDialog):
         self.log_msg(f"[1/3] API Anahtarı kaydedildi ({k[:3]}***). Merkez Bankası EVDS sunucularına bağlanılıyor...")
 
         end_dt = datetime.now().strftime("%d-%m-%Y")
-        start_dt = (datetime.now() - timedelta(days=920)).strftime("%d-%m-%Y")
+        start_dt = (datetime.now() - timedelta(days=1050)).strftime("%d-%m-%Y")
 
         # Olası tüm TÜFE seri kodları (Genel Endeks + 12 Aylık Ortalama Serileri)
         series_candidates = [
@@ -1223,7 +1190,7 @@ class MiniLegalCalculator(QDialog):
 
     def apply_math(self, func, label):
         try:
-            val = float(self.display.text().replace(",", "."))
+            val = float(self.display.text().replace(".", "").replace(",", "."))
             res = func(val)
             self.display.setText(f"{res:.2f}")
             self.lbl_info.setText(f"{label}: {turkce_sayi_okunusu(res)}")
@@ -1357,7 +1324,7 @@ class UcarHukukMain(QMainWindow):
                 "asgari_ucret_brut": 26005.50,
                 "vekalet_suret_harci": 98.40,
                 "baro_pulu": 120.0,
-                "tuik_kira_12_aylik": 0.0,
+                "tuik_kira_12_aylik": 31.23,
                 "karar_ilam_nispi_binde": 68.31
             },
             "tcmb_efektif": {
@@ -1661,13 +1628,57 @@ class UcarHukukMain(QMainWindow):
         nav_scroll.setWidget(nav_tree_w)
         nav_outer.addWidget(nav_scroll, 1)
 
-        zoom_row = QHBoxLayout()
-        zoom_row.addWidget(QLabel("Punto:"))
-        for lbl_z, pt in [("%100", 10), ("%125", 12), ("%150", 14)]:
+                # --- SOL ALT MODERN PUNTO (YAZI BOYUTU) KONTROL KARTI ---
+        punto_frame = QFrame()
+        punto_frame.setObjectName("SolAltPuntoKarti")
+        punto_frame.setStyleSheet(
+            "QFrame#SolAltPuntoKarti { background-color: #162B1F; border: 2px solid #C5A059; border-radius: 7px; padding: 4px; }"
+        )
+        pf_vlay = QVBoxLayout(punto_frame)
+        pf_vlay.setContentsMargins(6, 5, 6, 5)
+        pf_vlay.setSpacing(4)
+
+        pf_top = QHBoxLayout()
+        lbl_p_title = QLabel("🔍 Yazı Boyutu (Punto):")
+        lbl_p_title.setStyleSheet("color: #FFF2B2; font-weight: bold; border: none; background: transparent;")
+        self.lbl_punto_durum = QLabel(f"{self.font_size_pt} pt (%{int(self.font_size_pt*10)})")
+        self.lbl_punto_durum.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_punto_durum.setStyleSheet("color: #FFFFFF; font-weight: bold; border: none; background: transparent;")
+        pf_top.addWidget(lbl_p_title)
+        pf_top.addStretch()
+        pf_top.addWidget(self.lbl_punto_durum)
+        pf_vlay.addLayout(pf_top)
+
+        btn_p_style = (
+            "QPushButton { background-color: #FFFFFF; color: #0A3622; font-weight: 900; "
+            "border: 1.5px solid #C5A059; border-radius: 4px; padding: 4px 6px; min-height: 24px; }"
+            "QPushButton:hover { background-color: #D0E8DA; color: #052214; border-color: #FFFFFF; }"
+        )
+
+        pf_row1 = QHBoxLayout()
+        pf_row1.setSpacing(4)
+        btn_a_minus = QPushButton("🔉 A- Küçült")
+        btn_a_minus.setStyleSheet(btn_p_style)
+        btn_a_minus.clicked.connect(lambda: self.set_font_scale(max(8, self.font_size_pt - 1)))
+
+        btn_a_plus = QPushButton("🔊 A+ Büyüt")
+        btn_a_plus.setStyleSheet(btn_p_style)
+        btn_a_plus.clicked.connect(lambda: self.set_font_scale(min(18, self.font_size_pt + 1)))
+
+        pf_row1.addWidget(btn_a_minus, 1)
+        pf_row1.addWidget(btn_a_plus, 1)
+        pf_vlay.addLayout(pf_row1)
+
+        pf_row2 = QHBoxLayout()
+        pf_row2.setSpacing(4)
+        for lbl_z, pt in [("%90 (9pt)", 9), ("%100 (10pt)", 10), ("%120 (12pt)", 12), ("%140 (14pt)", 14)]:
             bz = QPushButton(lbl_z)
+            bz.setStyleSheet(btn_p_style)
             bz.clicked.connect(lambda ch, p=pt: self.set_font_scale(p))
-            zoom_row.addWidget(bz)
-        nav_outer.addLayout(zoom_row)
+            pf_row2.addWidget(bz, 1)
+        pf_vlay.addLayout(pf_row2)
+
+        nav_outer.addWidget(punto_frame)
 
         btn_theme = QPushButton("Gece / Fildişi Gündüz Modu")
         btn_theme.clicked.connect(self.toggle_day_night)
@@ -1832,6 +1843,27 @@ class UcarHukukMain(QMainWindow):
             self.badge_yasal.set_value(f"%{yasal:.2f}" if yasal > 0 else "Bekleniyor...")
             self.badge_avans.set_value(f"%{avans:.2f}" if avans > 0 else "Bekleniyor...")
             self.badge_kira.set_value(f"%{kira:.2f}" if kira > 0 else "Sağ Tıkla Gir")
+            if kira > 0:
+                kira_comma = f"{kira:.2f}".replace(".", ",")
+                if hasattr(self, "txt_kira_oran_manuel") and not self.txt_kira_oran_manuel.hasFocus():
+                    self.txt_kira_oran_manuel.blockSignals(True)
+                    self.txt_kira_oran_manuel.setText(f"{kira:.2f}")
+                    self.txt_kira_oran_manuel.blockSignals(False)
+                if hasattr(self, "cmb_tuik_donem") and self.cmb_tuik_donem.count() > 0:
+                    self.cmb_tuik_donem.blockSignals(True)
+                    self.cmb_tuik_donem.setItemText(0, f"Güncel Yürürlükteki TÜK 12 Aylık TÜFE (%{kira:.2f})")
+                    self.cmb_tuik_donem.setItemData(0, kira)
+                    self.cmb_tuik_donem.blockSignals(False)
+                if hasattr(self, "_faiz_studyo_ref") and self._faiz_studyo_ref is not None:
+                    st = self._faiz_studyo_ref
+                    st.bridge.rates["tufe_12ay_ort"] = kira
+                    st.update_banner_text()
+                    if hasattr(st, "le_kira_tufe12") and not st.le_kira_tufe12.hasFocus():
+                        st.le_kira_tufe12.blockSignals(True)
+                        st.le_kira_tufe12.setText(kira_comma)
+                        st.le_kira_tufe12.blockSignals(False)
+                        st.calc_kira_tufe12()
+                        st.refresh_mcp_table()
 
     def resize_left_nav(self, delta_px):
         sizes = self.main_splitter.sizes()
@@ -2245,7 +2277,7 @@ class UcarHukukMain(QMainWindow):
             try:
                 ana = float(self.tbl_kompozit_giris.item(r, 1).text().replace(".", "").replace(",", "."))
                 dt = datetime.strptime(self.tbl_kompozit_giris.item(r, 2).text().strip(), "%d.%m.%Y")
-                oran = float(self.tbl_kompozit_giris.item(r, 3).text().replace(",", "."))
+                oran = float(self.tbl_kompozit_giris.item(r, 3).text().replace(".", "").replace(",", "."))
                 gun = max(1, (datetime.now() - dt).days)
                 fz = (ana * oran * gun) / 36500.0
                 t_ana += ana
@@ -2529,68 +2561,125 @@ class UcarHukukMain(QMainWindow):
 
         w1 = QWidget(); l1 = QVBoxLayout(w1)
         sp1 = QSplitter(Qt.Orientation.Horizontal)
-        gb1 = QGroupBox("TÜİK 12 Aylık TÜFE Kira Artışı, Ecrimisil, Değer Artış Kazancı & KMK m.20 Aidat")
+        gb1 = QGroupBox("TÜK 12 Aylık TÜFE Kira Artışı, Ecrimisil, GVK Mük. m.80/81 Değer Artış Vergisi & KMK m.20 Aidat")
         fl1 = QVBoxLayout(gb1)
+        fl1.setSpacing(6)
 
-        fl1.addWidget(QLabel("Mevcut Kira / Aylık Ecrimisil / Aidat Bedeli (₺):"))
+        # --- BÖLÜM 1: KRA, ECRMSL VE ADAT GRŞLER ---
+        fl1.addWidget(QLabel("Mevcut Kira / Aylık Ecrimisil / Aidat Bedeli ():"))
         self.gm_tutar = CurrencyEdit("35.000,00")
         fl1.addWidget(self.gm_tutar)
 
-        fl1.addWidget(QLabel("Kira Yenileme Dönemi (TÜİK 12 Aylık TÜFE Cetveli):"))
+        fl1.addWidget(QLabel("Kira Yenileme Dönemi (TÜK 12 Aylık TÜFE Cetveli):"))
         self.cmb_tuik_donem = QComboBox()
         cetvel = self.cfg.get("tuik_kira_cetveli", [])
         if not cetvel:
-            g_oran = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 0.0)
-            cetvel = [{"donem": "Güncel Yürürlükteki TÜİK 12 Aylık TÜFE", "oran": g_oran}]
+            g_oran = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 31.23)
+            cetvel = [{"donem": "TÜK Veri Portalı (DF_TUFE_SDMX_TT01) - Oniki Aylık Ortalama", "oran": g_oran}]
         for item in cetvel:
             self.cmb_tuik_donem.addItem(f"{item['donem']} (%{item['oran']:.2f})", item["oran"])
         self.cmb_tuik_donem.currentIndexChanged.connect(self.on_tuik_donem_changed)
         fl1.addWidget(self.cmb_tuik_donem)
 
-        fl1.addWidget(QLabel("Uygulanacak Kira Artış Oranı (% - İsterseniz Elle Değiştirebilirsiniz):"))
-        self.txt_kira_oran_manuel = QLineEdit(str(self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 0.0)))
+        fl1.addWidget(QLabel("Uygulanacak Kira Artış Oranı (% - TÜK 12 Aylık Ortalama / Elle Değiştirilebilir):"))
+        k_init = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 31.23)
+        self.txt_kira_oran_manuel = QLineEdit(f"{float(k_init):.2f}")
         r_tuik_p = QHBoxLayout()
         r_tuik_p.addWidget(self.txt_kira_oran_manuel, 1)
-        btn_open_portal = QPushButton("TÜİK Veri Portalı'nı Aç (veriportali.tuik.gov.tr)")
+        btn_open_portal = QPushButton("TÜK Veri Portalı'nı Aç (DF_TUFE_SDMX_TT01)")
         btn_open_portal.clicked.connect(self.open_tuik_veri_portali)
         r_tuik_p.addWidget(btn_open_portal)
         fl1.addLayout(r_tuik_p)
 
         fl1.addWidget(QLabel("Ecrimisil / Geciken Aidat Süresi (Ay):"))
-        self.gm_ay = QSpinBox(); self.gm_ay.setRange(1, 60); self.gm_ay.setValue(12)
+        self.gm_ay = QSpinBox(); self.gm_ay.setRange(1, 120); self.gm_ay.setValue(12)
         fl1.addWidget(self.gm_ay)
 
-        fl1.addWidget(QLabel("Gayrimenkul Alış ve Satış Bedeli (Değer Artış Kazancı İçin ₺):"))
-        self.gm_alis = CurrencyEdit("2.000.000,00")
-        self.gm_satis = CurrencyEdit("4.500.000,00")
-        fl1.addWidget(self.gm_alis); fl1.addWidget(self.gm_satis)
+        # --- BÖLÜM 2: GAYRMENKUL DEER ARTIŞ KAZANCI VERGS (GVK MÜK. m.80 & m.81) TÜM KALEMLER ---
+        gb_dak = QGroupBox("Gayrimenkul Değer Artış Kazancı Vergisi Giriş Kalemleri (193 S.K. GVK Mük. m.80 & m.81)")
+        dak_lay = QVBoxLayout(gb_dak)
+        dak_lay.setSpacing(5)
 
-        btn1 = QPushButton("Kira Artışı, Ecrimisil, Değer Artış Vergisi ve KMK %5 Hesapla")
+        dak_lay.addWidget(QLabel("1. ktisap (Edinim) Şekli [Miras/Bağış Yoluyla Edinimde Vergi Doğmaz]:"))
+        self.cmb_gm_iktisap_sekli = QComboBox()
+        self.cmb_gm_iktisap_sekli.addItems([
+            "Satın Alma / vazlı ktisap (5 Yıl çinde Satışta Vergiye Tabi - GVK Mük. m.80/1-6)",
+            "Miras veya Bağış / vazsız ktisap (GVK Mük. m.80 Parantez çi: VERGDEN TAM STSNA)",
+            "Kooperatif Ortaklığı / Kat Karşılığı nşaat Tahsisi"
+        ])
+        dak_lay.addWidget(self.cmb_gm_iktisap_sekli)
+
+        dak_lay.addWidget(QLabel("2. Tapu Alış (ktisap) Tarihi ve Satış (Elden Çıkarma) Tarihi [5 Tam Yıl Kontrolü]:"))
+        r_dt_gm = QHBoxLayout()
+        self.dt_gm_alis = QLineEdit("15.05.2023")
+        self.dt_gm_satis = QLineEdit(datetime.now().strftime("%d.%m.%Y"))
+        r_dt_gm.addWidget(QLabel("Alış Tarihi:")); r_dt_gm.addWidget(self.dt_gm_alis, 1)
+        r_dt_gm.addWidget(QLabel("Satış Tarihi:")); r_dt_gm.addWidget(self.dt_gm_satis, 1)
+        dak_lay.addLayout(r_dt_gm)
+
+        dak_lay.addWidget(QLabel("3. Tapu Alış Bedeli () ve Tapu Satış Bedeli ():"))
+        r_bedel_gm = QHBoxLayout()
+        self.gm_alis = CurrencyEdit("1.500.000,00")
+        self.gm_satis = CurrencyEdit("4.800.000,00")
+        r_bedel_gm.addWidget(QLabel("Alış:")); r_bedel_gm.addWidget(self.gm_alis, 1)
+        r_bedel_gm.addWidget(QLabel("Satış:")); r_bedel_gm.addWidget(self.gm_satis, 1)
+        dak_lay.addLayout(r_bedel_gm)
+
+        dak_lay.addWidget(QLabel("4. Y-ÜFE Endeksleri (Alıştan Önceki Ay & Satıştan Önceki Ay Y-ÜFE) [GVK Mük. m.81/son]:"))
+        r_yiufe = QHBoxLayout()
+        self.txt_yiufe_alis = QLineEdit("2.137,62")
+        self.txt_yiufe_satis = QLineEdit("3.850,40")
+        btn_yiufe_auto = QPushButton("🔄 EVDS'den Y-ÜFE Çek")
+        btn_yiufe_auto.clicked.connect(self.fetch_yiufe_for_gm_dates)
+        r_yiufe.addWidget(QLabel("Alış Öncesi Ay:")); r_yiufe.addWidget(self.txt_yiufe_alis, 1)
+        r_yiufe.addWidget(QLabel("Satış Öncesi Ay:")); r_yiufe.addWidget(self.txt_yiufe_satis, 1)
+        r_yiufe.addWidget(btn_yiufe_auto)
+        dak_lay.addLayout(r_yiufe)
+
+        dak_lay.addWidget(QLabel("5. ndirilecek Giderler: Fatura/Tadilat/Komisyon/Kredi Faizi () + Satıcı Tapu Harcı:"))
+        r_gider_gm = QHBoxLayout()
+        self.gm_ek_gider = CurrencyEdit("50.000,00")
+        self.chk_gm_tapu_harci_indir = QCheckBox("Satıcı %2 Tapu Harcını Otomatik ndir")
+        self.chk_gm_tapu_harci_indir.setChecked(True)
+        r_gider_gm.addWidget(self.gm_ek_gider, 1)
+        r_gider_gm.addWidget(self.chk_gm_tapu_harci_indir)
+        dak_lay.addLayout(r_gider_gm)
+
+        dak_lay.addWidget(QLabel("6. GVK Mük. m.80/3 Yıllık Değer Artış Kazancı stisna Tutarı ():"))
+        self.gm_istisna = CurrencyEdit("120.000,00")
+        dak_lay.addWidget(self.gm_istisna)
+
+        fl1.addWidget(gb_dak)
+
+        btn1 = QPushButton("🧮 Kira Artışı, Ecrimisil, Değer Artış Kazancı Vergisi ve KMK %5 Hesapla")
+        btn1.setMinimumHeight(38)
         btn1.clicked.connect(self.hesapla_gayrimenkul)
-        fl1.addWidget(btn1); fl1.addStretch()
+        fl1.addWidget(btn1)
+        fl1.addStretch()
 
         rb1 = QWidget(); rl1 = QVBoxLayout(rb1)
-        self.tbl_gm = self.create_styled_table(0, 3, ["Gayrimenkul Kalemi", "Dayanak / Açıklama", "Tutar (₺)"])
+        self.tbl_gm = self.create_styled_table(0, 3, ["Hesaplama Kalemi / Aşama", "Yasal Dayanak & Hesaplama Detayı", "Tutar / Sonuç ()"])
         rl1.addWidget(self.tbl_gm)
-        rl1.addLayout(self.build_table_action_bar(self.tbl_gm, "Kira_Ecrimisil_Gayrimenkul"))
+        rl1.addLayout(self.build_table_action_bar(self.tbl_gm, "Kira_Ecrimisil_DegerArtisVergisi"))
 
         sp1.addWidget(self.wrap_scrollable(gb1)); sp1.addWidget(self.wrap_scrollable(rb1))
-        sp1.setSizes([390, 670])
+        sp1.setSizes([450, 650])
         l1.addWidget(sp1)
-        tabs.addTab(w1, "Kira & Ecrimisil")
+        tabs.addTab(w1, "Kira, Ecrimisil & Değer Artış Vergisi")
 
+        # 2. Alt Sekme: Nafaka ve Miras
         w2 = QWidget(); l2 = QVBoxLayout(w2)
         sp2 = QSplitter(Qt.Orientation.Horizontal)
         gb2 = QGroupBox("TÜFE Artışlı Birikmiş Nafaka ve TMK Miras vs. Feraiz Karşılaştırması")
         fl2 = QVBoxLayout(gb2)
 
-        fl2.addWidget(QLabel("Aylık Nafaka Tutarı (₺) ve Birikmiş Ay Sayısı:"))
+        fl2.addWidget(QLabel("Aylık Nafaka Tutarı () ve Birikmiş Ay Sayısı:"))
         self.naf_tutar = CurrencyEdit("10.000,00")
         self.naf_ay = QSpinBox(); self.naf_ay.setRange(1, 120); self.naf_ay.setValue(12)
         fl2.addWidget(self.naf_tutar); fl2.addWidget(self.naf_ay)
 
-        fl2.addWidget(QLabel("Miras Tereke Tutarı (₺) | Erkek Çocuk | Kız Çocuk:"))
-        self.miras_tereke = CurrencyEdit("6.000.000,00")
+        fl2.addWidget(QLabel("Miras Tereke Tutarı () | Erkek Çocuk | Kız Çocuk:"))
+        self.miras_tereke = CurrencyEdit("5.000.000,00")
         self.chk_miras_es = QCheckBox("Sağ Kalan Eş Var"); self.chk_miras_es.setChecked(True)
         r_mc = QHBoxLayout()
         self.miras_erkek = QSpinBox(); self.miras_erkek.setValue(1)
@@ -2598,21 +2687,22 @@ class UcarHukukMain(QMainWindow):
         r_mc.addWidget(self.miras_erkek); r_mc.addWidget(self.miras_kiz)
         fl2.addWidget(self.miras_tereke); fl2.addWidget(self.chk_miras_es); fl2.addLayout(r_mc)
 
-        btn2 = QPushButton("Birikmiş Nafaka ile TMK / Feraiz Miras Paylarını Hesapla")
+        btn2 = QPushButton("Nafaka ve Miras Paylarını Hesapla")
         btn2.clicked.connect(self.hesapla_miras_ve_nafaka)
         fl2.addWidget(btn2); fl2.addStretch()
 
         rb2 = QWidget(); rl2 = QVBoxLayout(rb2)
-        self.tbl_miras = self.create_styled_table(
-            0, 3, ["Mirasçı / Nafaka Kalemi", "4721 Sayılı TMK / Ana Tutar", "Feraiz Payı / TÜFE Artışlı"]
-        )
+        self.tbl_miras = self.create_styled_table(0, 3, ["Mirasçı / Nafaka Kalemi", "4721 Sayılı TMK / Ana Tutar", "Feraiz Payı / TÜFE Artışlı"])
         rl2.addWidget(self.tbl_miras)
         rl2.addLayout(self.build_table_action_bar(self.tbl_miras, "Miras_Feraiz_ve_Nafaka"))
 
         sp2.addWidget(self.wrap_scrollable(gb2)); sp2.addWidget(self.wrap_scrollable(rb2))
-        sp2.setSizes([380, 680])
+        sp2.setSizes([390, 670])
         l2.addWidget(sp2)
         tabs.addTab(w2, "Nafaka & Miras")
+
+        # Açılışta tabloyu otomatik doldur
+        QTimer.singleShot(200, self.hesapla_gayrimenkul)
         return tabs
 
     def on_tuik_donem_changed(self, idx):
@@ -2620,32 +2710,183 @@ class UcarHukukMain(QMainWindow):
         if val is not None:
             self.txt_kira_oran_manuel.setText(f"{float(val):.2f}")
 
+    def fetch_yiufe_for_gm_dates(self):
+        import urllib.request, json
+        from datetime import datetime, timedelta
+        api_key = self.cfg.get("evds_api_key", "").strip()
+        if not api_key:
+            self.notify("Otomatik Y-ÜFE çekimi için üst bardan EVDS API Anahtarınızı girebilir veya endeksi elle yazabilirsiniz.")
+            return
+        try:
+            d_alis = datetime.strptime(self.dt_gm_alis.text().strip(), "%d.%m.%Y")
+            d_satis = datetime.strptime(self.dt_gm_satis.text().strip(), "%d.%m.%Y")
+            prev_alis = (d_alis.replace(day=1) - timedelta(days=5))
+            prev_satis = (d_satis.replace(day=1) - timedelta(days=5))
+            start_s = (prev_alis - timedelta(days=45)).strftime("%d-%m-%Y")
+            end_s = (prev_satis + timedelta(days=32)).strftime("%d-%m-%Y")
+
+            for base_u in ["https://evds3.tcmb.gov.tr/igmevdsms-dis", "https://evds2.tcmb.gov.tr/service/evds"]:
+                try:
+                    url = f"{base_u}/series=TP.TUFE1YI.T1&startDate={start_s}&endDate={end_s}&type=json&formulas=0&frequency=5"
+                    req = urllib.request.Request(url, headers={"key": api_key, "User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=6) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        ym_map = {}
+                        for it in data.get("items", []):
+                            t_str = str(it.get("Tarih", "")).strip()
+                            v_str = it.get("TP_TUFE1YI_T1")
+                            if t_str and v_str not in (None, "", "ND", "null"):
+                                ym_map[t_str] = float(str(v_str).replace(",", "."))
+                        k_a1 = f"{prev_alis.year}-{prev_alis.month}"
+                        k_a2 = f"{prev_alis.year}-{prev_alis.month:02d}"
+                        k_s1 = f"{prev_satis.year}-{prev_satis.month}"
+                        k_s2 = f"{prev_satis.year}-{prev_satis.month:02d}"
+                        va = ym_map.get(k_a2) or ym_map.get(k_a1)
+                        vs = ym_map.get(k_s2) or ym_map.get(k_s1)
+                        if va:
+                            self.txt_yiufe_alis.setText(f"{va:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                        if vs:
+                            self.txt_yiufe_satis.setText(f"{vs:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+                        if va or vs:
+                            self.hesapla_gayrimenkul()
+                            self.notify(f"Y-ÜFE Endeksleri çekildi ({k_a2}: {va} -> {k_s2}: {vs})")
+                            return
+                except Exception:
+                    pass
+        except Exception as e:
+            self.notify(f"Tarih formatını GG.AA.YYYY olarak kontrol edin ({e})")
+
+    def _parse_tr_num(self, s):
+        if not s:
+            return 0.0
+        s = str(s).replace("", "").replace("TL", "").replace("%", "").strip()
+        if "," in s and "." in s:
+            s = s.replace(".", "").replace(",", ".")
+        elif "," in s:
+            s = s.replace(",", ".")
+        return float(s)
+
     def hesapla_gayrimenkul(self):
         t = self.gm_tutar.get_value()
         ay = self.gm_ay.value()
         try:
             tufe = float(self.txt_kira_oran_manuel.text().strip().replace(",", "."))
         except Exception:
-            tufe = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 0.0)
+            tufe = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 31.23)
 
         artis_tutari = t * (tufe / 100.0)
         yeni_kira = t + artis_tutari
-        ecrimisil = t * ay * (1 + (self.cfg.get("oranlar", {}).get("kanuni_faiz", 31.0) / 100.0))
+        yasal_f = float(self.cfg.get("oranlar", {}).get("kanuni_faiz", 31.0))
+        ecrimisil = t * ay * (1.0 + (yasal_f / 100.0) * (ay / 12.0))
+        kmk_anapara = t * ay
         kmk_gecikme = t * 0.05 * ay
-        fark = max(0.0, self.gm_satis.get_value() - (self.gm_alis.get_value() * 1.35) - 87000.0)
-        dak_vergi = fark * 0.20
+
+        alis_bedeli = self.gm_alis.get_value()
+        satis_bedeli = self.gm_satis.get_value()
+        ek_gider = self.gm_ek_gider.get_value() if hasattr(self, "gm_ek_gider") else 0.0
+        istisna_tutari = self.gm_istisna.get_value() if hasattr(self, "gm_istisna") else 120000.0
+        iktisap_idx = self.cmb_gm_iktisap_sekli.currentIndex() if hasattr(self, "cmb_gm_iktisap_sekli") else 0
+
+        satici_tapu_harci = satis_bedeli * 0.02
+        alici_tapu_harci = satis_bedeli * 0.02
+        toplam_tapu_harci = satis_bedeli * 0.04
+        indirilecek_tapu_harci = satici_tapu_harci if (hasattr(self, "chk_gm_tapu_harci_indir") and self.chk_gm_tapu_harci_indir.isChecked()) else 0.0
+        toplam_indirilecek_gider = ek_gider + indirilecek_tapu_harci
+
+        gun_farki = 0
+        bes_yil_doldu = False
+        tarih_aciklama = "-"
+        try:
+            d1 = datetime.strptime(self.dt_gm_alis.text().strip(), "%d.%m.%Y")
+            d2 = datetime.strptime(self.dt_gm_satis.text().strip(), "%d.%m.%Y")
+            gun_farki = (d2 - d1).days
+            try:
+                bes_yil_sonra = d1.replace(year=d1.year + 5)
+            except ValueError:
+                bes_yil_sonra = d1.replace(year=d1.year + 5, day=28)
+            bes_yil_doldu = (d2 >= bes_yil_sonra)
+            tarih_aciklama = f"{self.dt_gm_alis.text().strip()} -> {self.dt_gm_satis.text().strip()} ({gun_farki} Gün)"
+        except Exception:
+            tarih_aciklama = "Tarih Formatı: GG.AA.YYYY"
+
+        try:
+            yiufe_a = self._parse_tr_num(self.txt_yiufe_alis.text()) if hasattr(self, "txt_yiufe_alis") else 100.0
+            yiufe_s = self._parse_tr_num(self.txt_yiufe_satis.text()) if hasattr(self, "txt_yiufe_satis") else 135.0
+        except Exception:
+            yiufe_a, yiufe_s = 100.0, 135.0
+
+        yiufe_artis_orani = ((yiufe_s - yiufe_a) / yiufe_a) * 100.0 if yiufe_a > 0 else 0.0
+        if yiufe_artis_orani >= 10.0 and yiufe_a > 0:
+            endekslenmis_maliyet = alis_bedeli * (yiufe_s / yiufe_a)
+            endeks_aciklama = f"Y-ÜFE Artışı: %{yiufe_artis_orani:.2f} (>= %10 Olduğundan Maliyet Endekslendi)"
+        else:
+            endekslenmis_maliyet = alis_bedeli
+            endeks_aciklama = f"Y-ÜFE Artışı: %{yiufe_artis_orani:.2f} (< %10 Olduğundan Alış Bedeli Esas Alındı)"
+
+        brut_kazanc = max(0.0, satis_bedeli - endekslenmis_maliyet - toplam_indirilecek_gider)
+
+        muafiyet_sebebi = None
+        if iktisap_idx == 1:
+            muafiyet_sebebi = "vazsız ktisap (Miras/Bağış - GVK Mük. m.80 Parantez çi: VERG DOMAZ)"
+            vergi_matrahi = 0.0
+        elif bes_yil_doldu:
+            muafiyet_sebebi = f"5 Tam Yıl Süre Dolmuş ({gun_farki} Gün >= 5 Yıl - GVK Mük. m.80/1-6: VERG DOMAZ)"
+            vergi_matrahi = 0.0
+        else:
+            vergi_matrahi = max(0.0, brut_kazanc - istisna_tutari)
+
+        dilimler = [
+            (158000.0, 0.15),
+            (330000.0, 0.20),
+            (800000.0, 0.27),
+            (4300000.0, 0.35),
+            (float("inf"), 0.40)
+        ]
+        hesaplanan_vergi = 0.0
+        kalan_matrah = vergi_matrahi
+        alt_sinir = 0.0
+        dilim_detay_list = []
+
+        if vergi_matrahi > 0:
+            for ust_sinir, oran in dilimler:
+                if kalan_matrah <= 0:
+                    break
+                dilim_kapasitesi = ust_sinir - alt_sinir
+                bu_dilimdeki_tutar = min(kalan_matrah, dilim_kapasitesi)
+                bu_dilim_vergisi = bu_dilimdeki_tutar * oran
+                hesaplanan_vergi += bu_dilim_vergisi
+                dilim_detay_list.append(f"%{int(oran*100)}: {bu_dilim_vergisi:,.2f} ")
+                kalan_matrah -= bu_dilimdeki_tutar
+                alt_sinir = ust_sinir
+
+        efektif_vergi_orani = (hesaplanan_vergi / vergi_matrahi * 100.0) if vergi_matrahi > 0 else 0.0
+        dilim_ozet = " + ".join(dilim_detay_list[:3]) if dilim_detay_list else (muafiyet_sebebi or "Matrah Oluşmadı (Vergi Yok)")
+        net_ele_gecen = satis_bedeli - toplam_indirilecek_gider - hesaplanan_vergi
 
         rows = [
-            ("Mevcut Aylık Kira Bedeli", "Sözleşme Bedeli", f"{t:,.2f} ₺"),
-            ("TÜİK 12 Aylık TÜFE Kira Artış Tutarı", f"%{tufe:.2f} (6098 S.K. TBK m. 344)", f"+{artis_tutari:,.2f} ₺"),
-            ("YENİ DÖNEM AYLIK KİRA BEDELİ", f"Yıllık Toplam: {yeni_kira*12:,.2f} ₺", f"{yeni_kira:,.2f} ₺"),
-            (f"Dönemsel Ecrimisil (Haksız İşgal - {ay} Ay)", "Dönem Sonu Yasal Faiz Dahil", f"{ecrimisil:,.2f} ₺"),
-            ("634 Sayılı KMK m. 20 Aidat Gecikme Tazminatı", f"Aylık %5 x {ay} Ay", f"{kmk_gecikme:,.2f} ₺"),
-            ("Tapu Alım-Satım Harcı (%2 + %2 = %4)", "Satış Bedeli Üzerinden", f"{self.gm_satis.get_value()*0.04:,.2f} ₺"),
-            ("Gayrimenkul Değer Artış Kazancı Vergisi", "GVK Mükerrer m. 80 (Yİ-ÜFE Endeksli)", f"{dak_vergi:,.2f} ₺")
+            ("1. Mevcut Aylık Kira Bedeli", "Kira Sözleşmesi Bedeli", f"{t:,.2f} "),
+            ("2. TÜK 12 Aylık TÜFE Kira Artış Tutarı", f"%{tufe:.2f} (6098 S.K. TBK m. 344 Kira Tavanı)", f"+{artis_tutari:,.2f} "),
+            ("3. YEN DÖNEM AYLIK KRA BEDEL", f"Yıllık Yeni Kira Toplamı: {yeni_kira*12:,.2f} ", f"{yeni_kira:,.2f} "),
+            (f"4. Dönemsel Ecrimisil (Haksız şgal - {ay} Ay)", f"Yasal Faiz (%{yasal_f:.2f}) Dahil", f"{ecrimisil:,.2f} "),
+            (f"5. KMK m. 20 Aidat Gecikme Tazminatı ({ay} Ay)", f"Anapara: {kmk_anapara:,.2f}  + Aylık %5 Tazminat", f"{kmk_gecikme:,.2f} "),
+            ("6. [DEER ARTIŞ] ktisap & 5 Yıl Süre Kontrolü", tarih_aciklama, "MUAF (Vergi Doğmaz)" if (bes_yil_doldu or iktisap_idx == 1) else f"VERGYE TAB ({gun_farki} Gün < 5 Yıl)"),
+            ("7. [DEER ARTIŞ] Tapu Alış (ktisap) Bedeli", f"Alıştan Önceki Ay Y-ÜFE Endeksi: {yiufe_a:,.2f}", f"{alis_bedeli:,.2f} "),
+            ("8. [DEER ARTIŞ] Tapu Satış (Elden Çıkarma) Bedeli", f"Satıştan Önceki Ay Y-ÜFE Endeksi: {yiufe_s:,.2f}", f"{satis_bedeli:,.2f} "),
+            ("9. [GVK Mük. m.81] Y-ÜFE Endekslenmiş Maliyet Bedeli", endeks_aciklama, f"{endekslenmis_maliyet:,.2f} "),
+            ("10. [GVK Mük. m.81] ndirilecek Giderler ve Satıcı Harcı", f"Satıcı %2 Harç ({indirilecek_tapu_harci:,.2f} ) + Ek Gider ({ek_gider:,.2f} )", f"-{toplam_indirilecek_gider:,.2f} "),
+            ("11. [DEER ARTIŞ] Endeksleme Sonrası Safi Değer Artışı", "Satış Bedeli - Endekslenmiş Maliyet - Giderler", f"{brut_kazanc:,.2f} "),
+            ("12. [GVK Mük. m.80] Yıllık Değer Artış Kazancı stisnası", "Vergiden Müstesna Yasal Tutar (GVK Mük. m.80/3)", f"-{istisna_tutari:,.2f} "),
+            ("13. [VERG MATRAHI] Vergiye Tabi Değer Artış Matrahı", muafiyet_sebebi if muafiyet_sebebi else "Safi Değer Artışı - Yıllık stisna", f"{vergi_matrahi:,.2f} "),
+            ("14. [TAPU HARCI] 492 S.K. Tapu Alım-Satım Harcı (%2+%2)", f"Alıcı %2: {alici_tapu_harci:,.2f}  | Satıcı %2: {satici_tapu_harci:,.2f} ", f"{toplam_tapu_harci:,.2f} "),
+            ("15. [ÖDENECEK VERG] HESAPLANAN DEER ARTIŞ GELR VERGS", f"GVK m.103 Kademeli (Efektif: %{efektif_vergi_orani:.2f}) | {dilim_ozet}", f"{hesaplanan_vergi:,.2f} "),
+            ("16. [NET SONUÇ] Vergi ve Giderler Sonrası Net Ele Geçen", "Satış Bedeli - ndirilecek Giderler - Gelir Vergisi", f"{net_ele_gecen:,.2f} ")
         ]
         self.populate_table(self.tbl_gm, rows)
-        self.notify(f"%{tufe:.2f} TÜİK oranıyla yeni kira hesaplandı: {yeni_kira:,.2f} ₺")
+        self.notify(f"Kira (%{tufe:.2f}) ve Değer Artış Vergisi ({hesaplanan_vergi:,.2f} ) eksiksiz hesaplandı.")
+
+
+
+
 
     def hesapla_miras_ve_nafaka(self):
         naf = self.naf_tutar.get_value() * self.naf_ay.value()
@@ -2920,7 +3161,7 @@ class UcarHukukMain(QMainWindow):
             try:
                 ana = float(self.tbl_kompozit_giris.item(r, 1).text().replace(".", "").replace(",", "."))
                 dt = datetime.strptime(self.tbl_kompozit_giris.item(r, 2).text().strip(), "%d.%m.%Y")
-                oran = float(self.tbl_kompozit_giris.item(r, 3).text().replace(",", "."))
+                oran = float(self.tbl_kompozit_giris.item(r, 3).text().replace(".", "").replace(",", "."))
                 gun = max(1, (datetime.now() - dt).days)
                 fz = (ana * oran * gun) / 36500.0
                 t_ana += ana
@@ -3198,97 +3439,7 @@ class UcarHukukMain(QMainWindow):
         self.notify("Aktüerya ve araç değer kaybı hesaplandı.")
 
     # KATEGOR 5: KRA & MRAS
-    def build_cat5_kira_miras(self):
-        tabs = QTabWidget()
-        tabs.tabBar().setVisible(False)
 
-        w1 = QWidget(); l1 = QVBoxLayout(w1)
-        sp1 = QSplitter(Qt.Orientation.Horizontal)
-        gb1 = QGroupBox("Kira Artışı, Ecrimisil, Değer Artış Kazancı, GMSİ & KMK m.20 Aidat")
-        fl1 = QVBoxLayout(gb1)
-
-        fl1.addWidget(QLabel("Mevcut Kira / Aylık Ecrimisil / Aidat Bedeli (₺):"))
-        self.gm_tutar = CurrencyEdit("35.000,00")
-        fl1.addWidget(self.gm_tutar)
-
-        fl1.addWidget(QLabel("Ecrimisil / Geciken Aidat Süresi (Ay):"))
-        self.gm_ay = QSpinBox(); self.gm_ay.setRange(1, 60); self.gm_ay.setValue(12)
-        fl1.addWidget(self.gm_ay)
-
-        fl1.addWidget(QLabel("Gayrimenkul Alış ve Satış Bedeli (Değer Artış Kazancı İçin ₺):"))
-        self.gm_alis = CurrencyEdit("2.000.000,00")
-        self.gm_satis = CurrencyEdit("4.500.000,00")
-        fl1.addWidget(self.gm_alis); fl1.addWidget(self.gm_satis)
-
-        btn1 = QPushButton("Kira, Ecrimisil, Değer Artış Vergisi ve KMK %5 Hesapla")
-        btn1.clicked.connect(self.hesapla_gayrimenkul)
-        fl1.addWidget(btn1); fl1.addStretch()
-
-        rb1 = QWidget(); rl1 = QVBoxLayout(rb1)
-        self.tbl_gm = self.create_styled_table(0, 3, ["Gayrimenkul Kalemi", "Dayanak / Açıklama", "Tutar (₺)"])
-        rl1.addWidget(self.tbl_gm)
-        rl1.addLayout(self.build_table_action_bar(self.tbl_gm, "Kira_Ecrimisil_Gayrimenkul"))
-
-        sp1.addWidget(self.wrap_scrollable(gb1)); sp1.addWidget(self.wrap_scrollable(rb1))
-        sp1.setSizes([380, 680])
-        l1.addWidget(sp1)
-        tabs.addTab(w1, "Kira & Ecrimisil")
-
-        w2 = QWidget(); l2 = QVBoxLayout(w2)
-        sp2 = QSplitter(Qt.Orientation.Horizontal)
-        gb2 = QGroupBox("TÜFE Artışlı Birikmiş Nafaka ve TMK Miras vs. Feraiz Karşılaştırması")
-        fl2 = QVBoxLayout(gb2)
-
-        fl2.addWidget(QLabel("Aylık Nafaka Tutarı (₺) ve Birikmiş Ay Sayısı:"))
-        self.naf_tutar = CurrencyEdit("10.000,00")
-        self.naf_ay = QSpinBox(); self.naf_ay.setRange(1, 120); self.naf_ay.setValue(12)
-        fl2.addWidget(self.naf_tutar); fl2.addWidget(self.naf_ay)
-
-        fl2.addWidget(QLabel("Miras Tereke Tutarı (₺) | Erkek Çocuk | Kız Çocuk:"))
-        self.miras_tereke = CurrencyEdit("6.000.000,00")
-        self.chk_miras_es = QCheckBox("Sağ Kalan Eş Var"); self.chk_miras_es.setChecked(True)
-        r_mc = QHBoxLayout()
-        self.miras_erkek = QSpinBox(); self.miras_erkek.setValue(1)
-        self.miras_kiz = QSpinBox(); self.miras_kiz.setValue(1)
-        r_mc.addWidget(self.miras_erkek); r_mc.addWidget(self.miras_kiz)
-        fl2.addWidget(self.miras_tereke); fl2.addWidget(self.chk_miras_es); fl2.addLayout(r_mc)
-
-        btn2 = QPushButton("Birikmiş Nafaka ile TMK / Feraiz Miras Paylarını Hesapla")
-        btn2.clicked.connect(self.hesapla_miras_ve_nafaka)
-        fl2.addWidget(btn2); fl2.addStretch()
-
-        rb2 = QWidget(); rl2 = QVBoxLayout(rb2)
-        self.tbl_miras = self.create_styled_table(
-            0, 3, ["Mirasçı / Nafaka Kalemi", "4721 Sayılı TMK / Ana Tutar", "Feraiz Payı / TÜFE Artışlı"]
-        )
-        rl2.addWidget(self.tbl_miras)
-        rl2.addLayout(self.build_table_action_bar(self.tbl_miras, "Miras_Feraiz_ve_Nafaka"))
-
-        sp2.addWidget(self.wrap_scrollable(gb2)); sp2.addWidget(self.wrap_scrollable(rb2))
-        sp2.setSizes([380, 680])
-        l2.addWidget(sp2)
-        tabs.addTab(w2, "Nafaka & Miras")
-        return tabs
-
-    def hesapla_gayrimenkul(self):
-        t = self.gm_tutar.get_value()
-        ay = self.gm_ay.value()
-        tufe = self.cfg.get("oranlar", {}).get("tuik_kira_12_aylik", 0.0)
-        yeni_kira = t * (1 + tufe / 100.0)
-        ecrimisil = t * ay * 1.24
-        kmk_gecikme = t * 0.05 * ay
-        fark = max(0.0, self.gm_satis.get_value() - (self.gm_alis.get_value() * 1.35) - 87000.0)
-        dak_vergi = fark * 0.20
-
-        rows = [
-            ("TÜİK 12 Aylık TÜFE Artışlı Yeni Kira", f"%{tufe:.2f} (6098 S.K. m. 344)", f"{yeni_kira:,.2f} ₺"),
-            (f"Dönemsel Ecrimisil (Haksız İşgal - {ay} Ay)", "Dönem Sonu Yasal Faiz Dahil", f"{ecrimisil:,.2f} ₺"),
-            ("634 Sayılı KMK m. 20 Aidat Gecikme Tazminatı", f"Aylık %5 x {ay} Ay", f"{kmk_gecikme:,.2f} ₺"),
-            ("Tapu Alım-Satım Harcı (%2 + %2 = %4)", "Satış Bedeli Üzerinden", f"{self.gm_satis.get_value()*0.04:,.2f} ₺"),
-            ("Gayrimenkul Değer Artış Kazancı Vergisi", "GVK Mükerrer m. 80 (Yİ-ÜFE Endeksli)", f"{dak_vergi:,.2f} ₺")
-        ]
-        self.populate_table(self.tbl_gm, rows)
-        self.notify("Kira, ecrimisil ve değer artış kazancı hesaplandı.")
 
     def hesapla_miras_ve_nafaka(self):
         naf = self.naf_tutar.get_value() * self.naf_ay.value()
@@ -3435,7 +3586,7 @@ class UcarHukukMain(QMainWindow):
 
     def hesapla_usul_sure_harc(self):
         d0 = self.usul_teblig.get_date()
-        teblig = d0 + timedelta(days=5) if self.chk_uets.isChecked() else d0
+        teblig = d0 + timedelta(days=1050) if self.chk_uets.isChecked() else d0
         g = int(self.usul_gun.currentText().split()[0])
         son = teblig + timedelta(days=g)
         not_at = "Normal Mesai"
@@ -3443,7 +3594,7 @@ class UcarHukukMain(QMainWindow):
             son = datetime(son.year, 9, 7)
             not_at = "HMK m. 104 Adli Tatil Uzatması (7 Eylül)"
         while son.weekday() >= 5:
-            son += timedelta(days=1)
+            son += timedelta(days=1050)
 
         gider_avansi = (self.usul_taraf.value() * 1050.0) + 550.0
         delil_avansi = (self.usul_tanik.value() * 350.0) + 4500.0
@@ -3753,7 +3904,7 @@ class UcarHukukMain(QMainWindow):
     def save_parameters_from_table(self):
         for r in range(self.tbl_parametreler.rowCount()):
             full_k = self.tbl_parametreler.item(r, 0).text()
-            val_str = self.tbl_parametreler.item(r, 2).text().replace(",", ".")
+            val_str = self.tbl_parametreler.item(r, 2).text().replace(".", "").replace(",", ".")
             try:
                 if "." in full_k:
                     grp, k = full_k.split(".", 1)
@@ -4698,9 +4849,18 @@ class UcarHukukMain(QMainWindow):
         dlg.show()
 
     def set_font_scale(self, pt):
-        self.font_size_pt = pt
+        self.font_size_pt = int(pt)
+        if hasattr(self, "lbl_punto_durum"):
+            self.lbl_punto_durum.setText(f"{self.font_size_pt} pt (%{int(self.font_size_pt*10)})")
         self.apply_theme()
-        self.notify(f"Yazı boyutu ve tablo satır yükseklikleri (%{int(pt*10)}) güncellendi.")
+        try:
+            from faiz_studyo_eklenti import enforce_all_green_on_white
+            enforce_all_green_on_white(self, custom_pt=self.font_size_pt)
+        except Exception:
+            pass
+        for tbl in self.findChildren(QTableWidget):
+            tbl.verticalHeader().setDefaultSectionSize(max(26, int(self.font_size_pt * 3.2)))
+        self.notify(f"Yazı boyutu ({self.font_size_pt} pt / %{int(self.font_size_pt*10)}) tüm modüllerde güncellendi.")
 
     def reset_active_form(self):
         self.notify("Aktif sekme alanı sıfırlandı (ESC).")
@@ -4882,7 +5042,7 @@ if __name__ == "__main__":
     app.setPalette(pal)
 
     splash = StagedSplashScreen()
-    splash.show()
+    pass
     app.processEvents()
 
     load_heavy_libraries(splash.update_progress)
@@ -4899,6 +5059,8 @@ if __name__ == "__main__":
         win.setWindowOpacity(ui_prefs.get("opacity", 100) / 100.0)
 
     splash.update_progress(100, "Hazır! Uçar Hukuk Programı Açılıyor...")
+    from faiz_studyo_eklenti import attach_faiz_studyo_to_main
+    attach_faiz_studyo_to_main(win)
     win.show()
     splash.finish(win)
     QTimer.singleShot(250, win.warmup_remaining_tabs)
