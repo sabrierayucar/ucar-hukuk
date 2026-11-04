@@ -1488,3 +1488,10 @@ def install_kira_sync_and_thousand_formatter(win):
     sync_timer.timeout.connect(_sync_all_kira_fields)
     sync_timer.start()
     win._kira_sync_timer = sync_timer
+
+    try:
+        from verimlilik_paketi_eklenti import install_6_productivity_features
+        QTimer.singleShot(600, lambda: install_6_productivity_features(win))
+    except Exception as _e:
+        print("Verimlilik paketi yükleme notu:", _e)
+
