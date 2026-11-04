@@ -13,3 +13,4 @@ dosya_kayit_defteri.json
 dist/
 *.spec
 Calisan_Surum_Yedekleri/
+build/
