@@ -14,3 +14,6 @@ dist/
 *.spec
 Calisan_Surum_Yedekleri/
 build/
+
+Ucar_Hukuk.exe
+*.bat
