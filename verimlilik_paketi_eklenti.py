@@ -1,3 +1,9 @@
+
+import ctypes
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('UcarHukuk.Desktop.Suite.2026')
+except Exception:
+    pass
 # -*- coding: utf-8 -*-
 import os
 import re
@@ -636,6 +642,18 @@ def install_6_productivity_features(win):
     if getattr(win, "_verimlilik_6_installed", False):
         return
     win._verimlilik_6_installed = True
+    try:
+        from PyQt6.QtGui import QIcon
+        from PyQt6.QtWidgets import QApplication
+        _ico_p = os.path.join(BASE_DIR, 'ucar_modern_icon.ico')
+        if os.path.exists(_ico_p):
+            _ic = QIcon(_ico_p)
+            win.setWindowIcon(_ic)
+            if QApplication.instance():
+                QApplication.instance().setWindowIcon(_ic)
+    except Exception:
+        pass
+
 
     # 1 & 4) Alış ve Satış tarihi değiştiğinde 10 yıllık yerleşik Y-ÜFE arşivinden
     #        önceki ayın Y-ÜFE endeksini ve satış yılına göre GVK stisna tutarını otomatik doldur!
