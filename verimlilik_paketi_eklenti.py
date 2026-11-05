@@ -642,6 +642,7 @@ def install_6_productivity_features(win):
     if getattr(win, "_verimlilik_6_installed", False):
         return
     win._verimlilik_6_installed = True
+    _bind_global_dialog_icons(win)
     try:
         from PyQt6.QtGui import QIcon
         from PyQt6.QtWidgets import QApplication
@@ -723,3 +724,30 @@ def install_6_productivity_features(win):
 
     # Açılışta Y-ÜFE arşivinden mevcut tarihleri bir kez eşleştir
     QTimer.singleShot(400, _auto_fill_yiufe_and_yearly_exemption)
+
+
+def _bind_global_dialog_icons(win):
+    try:
+        from PyQt6.QtGui import QIcon
+        from PyQt6.QtWidgets import QApplication, QDialog, QWidget
+        from PyQt6.QtCore import QObject, QEvent
+        _ico_p = os.path.join(BASE_DIR, "ucar_modern_icon.ico")
+        if not os.path.exists(_ico_p):
+            return
+        _ic = QIcon(_ico_p)
+        win.setWindowIcon(_ic)
+        app = QApplication.instance()
+        if app:
+            app.setWindowIcon(_ic)
+            class _GlobalIconFilter(QObject):
+                def eventFilter(self, obj, ev):
+                    if ev.type() in (QEvent.Type.Show, QEvent.Type.WindowTitleChange, QEvent.Type.Polish):
+                        if isinstance(obj, (QDialog, QWidget)) and obj.isWindow():
+                            obj.setWindowIcon(_ic)
+                    return False
+            win._global_ico_filter = _GlobalIconFilter(win)
+            app.installEventFilter(win._global_ico_filter)
+            for w in app.topLevelWidgets():
+                w.setWindowIcon(_ic)
+    except Exception:
+        pass
