@@ -642,6 +642,12 @@ def install_6_productivity_features(win):
     if getattr(win, "_verimlilik_6_installed", False):
         return
     win._verimlilik_6_installed = True
+    try:
+        import harc_ve_format_eklenti
+        harc_ve_format_eklenti.install_harclar_ve_duzeltmeler(win)
+    except Exception as e:
+        print('Harc eklenti hatasi:', e)
+
     _bind_global_dialog_icons(win)
     try:
         from PyQt6.QtGui import QIcon
